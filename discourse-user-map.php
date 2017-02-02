@@ -41,6 +41,16 @@ class DiscourseUserMap {
 		write_log( $user_fields );
 	}
 
+	protected function get_discourse_user_field_info( $discourse_url, $force_update = null ) {
+		$discourse_user_fields = get_transient( 'discourse_user_fields' );
+
+		if ( empty( $discourse_user_fields || $force_update ) ) {
+			$discourse_url = $discourse_url . '/site.json';
+			$site_json = wp_remote_get( $discourse_url );
+		}
+
+	}
+
 	protected function verify_discourse_request( $data ) {
 		if ( $sig = substr( $data->get_header( 'X-Discourse-Event-Signature' ), 7 ) ) {
 			$raw    = $data->get_body();
