@@ -7,19 +7,24 @@
 
 namespace DiscourseUserMap;
 
-class DiscourseUserMap {
+use DiscourseUserMap\PageTemplater;
 
-	// Used for development.
-	function write_log( $log ) {
-		if ( is_array( $log ) || is_object( $log ) ) {
-			error_log( print_r( $log, true ) );
-		} else {
-			error_log( $log );
-		}
-	}
+add_action( 'plugins_loaded', __NAMESPACE__ . '\\init' );
+function init() {
+	require_once( __DIR__ . '/pagetemplater.php' );
+	PageTemplater\PageTemplater::get_instance();
+}
+
+class DiscourseUserMap {
 
 	public function __construct() {
 		add_action( 'rest_api_init', array( $this, 'initialize_location_route' ) );
+	}
+
+	public function add_template_to_dropdown( $posts_templates ) {
+		$posts_templates = array_merge( $posts_templates, $this->templates );
+
+		return $posts_templates;
 	}
 
 	public function initialize_location_route() {
@@ -37,18 +42,31 @@ class DiscourseUserMap {
 
 			return null;
 		}
-		$user_fields = $data->get_json_params()['user']['user_fields'];
-		write_log( $user_fields );
-	}
+		write_log( $data->get_json_params() );
+		$user_field_data  = $data->get_json_params()['user']['user_fields'];
+		$user_fields_info = $this->get_discourse_user_fields_info( 'http://localhost:3000' );
 
-	protected function get_discourse_user_field_info( $discourse_url, $force_update = null ) {
-		$discourse_user_fields = get_transient( 'discourse_user_fields' );
+		$user_location = [];
 
-		if ( empty( $discourse_user_fields || $force_update ) ) {
-			$discourse_url = $discourse_url . '/site.json';
-			$site_json = wp_remote_get( $discourse_url );
+		foreach ( $user_fields_info as $field_info ) {
+			$this->process_user_field( 'city', $field_info, $user_field_data, $user_location );
+			$this->process_user_field( 'state/province', $field_info, $user_field_data, $user_location );
+			$this->process_user_field( 'country', $field_info, $user_field_data, $user_location );
+			$this->process_user_field( 'map', $field_info, $user_field_data, $user_location );
 		}
 
+		if ( ! empty( $user_location['city'] ) || ! empty( $user_location['state/province'] ) || ! empty( $user_location['country'] ) ) {
+			$location = $user_location['city'] . ' ' . $user_location['state/province'] . ' ' . $user_location['country'];
+			write_log($location);
+		}
+
+	}
+
+	protected function process_user_field( $field_name, $field_info, $field_data, &$user_location ) {
+		if ( $field_name === strtolower( $field_info['name'] ) ) {
+			$id                           = $field_info['id'];
+			$user_location[ $field_name ] = isset( $field_data[ $id ] ) ? $field_data[ $id ] : '';
+		}
 	}
 
 	protected function verify_discourse_request( $data ) {
@@ -67,6 +85,54 @@ class DiscourseUserMap {
 		}
 	}
 
+	protected function get_discourse_user_fields_info( $discourse_url, $force_update = null ) {
+		$user_fields_info = get_transient( 'discourse_user_fields' );
+
+		if ( empty( $user_fields_info || $force_update ) ) {
+			$discourse_url = $discourse_url . '/site.json';
+			$remote        = wp_remote_get( $discourse_url );
+
+			if ( ! $this->validate_remote_get( $remote ) ) {
+
+				return 0;
+			}
+
+			$remote = json_decode( wp_remote_retrieve_body( $remote ), true );
+
+			if ( ! empty( $remote['user_fields'] ) ) {
+				$user_fields_info = $remote['user_fields'];
+
+				set_transient( 'discourse_user_fields', $user_fields_info, DAY_IN_SECONDS );
+			} else {
+
+				return new \WP_Error( 'key_not_found', 'The user_field key was not found in the response.' );
+			}
+		}
+
+		return $user_fields_info;
+	}
+
+	protected function validate_remote_get( $response ) {
+		if ( empty( $response ) ) {
+			error_log( 'Discourse has returned an empty response.' );
+
+			return 0;
+		} elseif ( is_wp_error( $response ) ) {
+			error_log( $response->get_error_message() );
+
+			return 0;
+
+			// There is a response from the server, but it's not what we're looking for.
+		} elseif ( intval( wp_remote_retrieve_response_code( $response ) ) !== 200 ) {
+			$error_message = wp_remote_retrieve_response_message( $response );
+			error_log( 'There has been a problem accessing your Discourse forum. Error Message: ' . $error_message );
+
+			return 0;
+		} else {
+			// Valid response.
+			return 1;
+		}
+	}
 }
 
 $discourse_user_map = new \DiscourseUserMap\DiscourseUserMap();
