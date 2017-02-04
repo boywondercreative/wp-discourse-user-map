@@ -46,6 +46,7 @@ class DiscourseUserMap {
 			$marker_data = array(
 				'markername' => $username,
 				'geocode' => $location,
+				'layer' => 1,
 			);
 
 			return \MMPAPI::add_marker( $marker_data );
